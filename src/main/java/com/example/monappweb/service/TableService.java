@@ -96,6 +96,7 @@ public class TableService {
     }
 
     // Mapper entité → DTO
+
     private TableResponse toResponse(TableRestaurant t) {
         return new TableResponse(
                 t.getId(),
