@@ -1,10 +1,12 @@
 package com.example.monappweb.service;
 
+import com.example.monappweb.dto.UpdateProfilRequest;
 import com.example.monappweb.dto.UtilisateurRequest;
 import com.example.monappweb.dto.UtilisateurResponse;
 import com.example.monappweb.entity.Utilisateur;
 import com.example.monappweb.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -64,5 +66,32 @@ public class UtilisateurService {
                 u.getRole(),
                 u.isActif()
         );
+    }
+
+    // Ajoute cette méthode
+    public UtilisateurResponse modifierProfil(UpdateProfilRequest request) {
+        // Récupère l'utilisateur connecté
+        String username = SecurityContextHolder.getContext()
+                .getAuthentication().getName();
+
+        Utilisateur utilisateur = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Utilisateur introuvable"));
+
+        // Vérifie si le nouveau username est déjà pris par quelqu'un d'autre
+        if (!utilisateur.getUsername().equals(request.getUsername()) &&
+                userRepository.existsByUsername(request.getUsername())) {
+            throw new RuntimeException("Ce username existe déjà : " + request.getUsername());
+        }
+
+        utilisateur.setNom(request.getNom());
+        utilisateur.setPrenom(request.getPrenom());
+        utilisateur.setUsername(request.getUsername());
+
+        // Change le mot de passe seulement si renseigné
+        if (request.getPassword() != null && !request.getPassword().isBlank()) {
+            utilisateur.setPassword(passwordEncoder.encode(request.getPassword()));
+        }
+
+        return toResponse(userRepository.save(utilisateur));
     }
 }

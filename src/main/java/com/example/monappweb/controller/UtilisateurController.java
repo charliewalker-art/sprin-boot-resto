@@ -1,5 +1,6 @@
 package com.example.monappweb.controller;
 
+import com.example.monappweb.dto.UpdateProfilRequest;
 import com.example.monappweb.dto.UtilisateurRequest;
 import com.example.monappweb.dto.UtilisateurResponse;
 import com.example.monappweb.service.UtilisateurService;
@@ -39,5 +40,12 @@ public class UtilisateurController {
     @PreAuthorize("hasRole('RESPONSABLE_PERSONNEL')")
     public ResponseEntity<UtilisateurResponse> toggle(@PathVariable Long id) {
         return ResponseEntity.ok(utilisateurService.toggleActif(id));
+    }
+
+    @PatchMapping("/profil")
+    @CrossOrigin(origins = "*")
+    public ResponseEntity<UtilisateurResponse> modifierProfil(
+            @Valid @RequestBody UpdateProfilRequest request) {
+        return ResponseEntity.ok(utilisateurService.modifierProfil(request));
     }
 }
