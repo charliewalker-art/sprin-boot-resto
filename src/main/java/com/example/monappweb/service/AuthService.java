@@ -38,6 +38,7 @@ public class AuthService {
 
         // 4. On retourne le token + infos utiles
         return new LoginResponse(
+                utilisateur.getId(),
                 token,
                 utilisateur.getUsername(),
                 utilisateur.getRole().name(),

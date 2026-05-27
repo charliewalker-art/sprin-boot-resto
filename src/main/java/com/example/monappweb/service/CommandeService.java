@@ -7,6 +7,7 @@ import com.example.monappweb.repository.PlatRepository;
 import com.example.monappweb.repository.TableRepository;
 import com.example.monappweb.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +23,15 @@ public class CommandeService {
     private final PlatRepository platRepository;
     private final TableRepository tableRepository;
     private final UserRepository userRepository;
+    private final SimpMessagingTemplate messagingTemplate; // ← WebSocket
+
+    // ─────────────────────────────────────────────
+    // NOTIFICATION WebSocket
+    // ─────────────────────────────────────────────
+
+    private void notifier(CommandeResponse response) {
+        messagingTemplate.convertAndSend("/topic/commandes", response);
+    }
 
     // ─────────────────────────────────────────────
     // CRÉATION (Client QR ou Serveur)
@@ -35,21 +45,18 @@ public class CommandeService {
         commande.setTempsAttenteEstime(request.getTempsAttenteEstime());
         commande.setNomClientRetrait(request.getNomClientRetrait());
 
-        // Lier la table si sur place
         if (request.getTableId() != null) {
             TableRestaurant table = tableRepository.findById(request.getTableId())
                     .orElseThrow(() -> new RuntimeException("Table introuvable : " + request.getTableId()));
             commande.setTable(table);
         }
 
-        // Lier le serveur si renseigné
         if (request.getServeurId() != null && request.getServeurId() != 0) {
             Utilisateur serveur = userRepository.findById(request.getServeurId())
                     .orElseThrow(() -> new RuntimeException("Serveur introuvable : " + request.getServeurId()));
             commande.setServeur(serveur);
         }
 
-        // Construire les lignes de commande
         List<DetailCommande> details = request.getDetails().stream().map(d -> {
             Plat plat = platRepository.findById(d.getPlatId())
                     .orElseThrow(() -> new RuntimeException("Plat introuvable : " + d.getPlatId()));
@@ -67,7 +74,9 @@ public class CommandeService {
         commande.setDetails(details);
 
         Commande saved = commandeRepository.save(commande);
-        return CommandeResponse.fromEntity(saved);
+        CommandeResponse response = CommandeResponse.fromEntity(saved);
+        notifier(response); // ← notifie la cuisine immédiatement
+        return response;
     }
 
     // ─────────────────────────────────────────────
@@ -79,7 +88,9 @@ public class CommandeService {
         Commande commande = getCommandeOuErreur(id);
         verifierStatutAutorise(commande, StatutCommande.CREEE);
         commande.setStatut(StatutCommande.EN_ATTENTE_CUISINE);
-        return CommandeResponse.fromEntity(commandeRepository.save(commande));
+        CommandeResponse response = CommandeResponse.fromEntity(commandeRepository.save(commande));
+        notifier(response);
+        return response;
     }
 
     // ─────────────────────────────────────────────
@@ -91,7 +102,9 @@ public class CommandeService {
         Commande commande = getCommandeOuErreur(id);
         verifierStatutAutorise(commande, StatutCommande.EN_ATTENTE_CUISINE);
         commande.setStatut(StatutCommande.EN_PREPARATION);
-        return CommandeResponse.fromEntity(commandeRepository.save(commande));
+        CommandeResponse response = CommandeResponse.fromEntity(commandeRepository.save(commande));
+        notifier(response);
+        return response;
     }
 
     // ─────────────────────────────────────────────
@@ -103,7 +116,9 @@ public class CommandeService {
         Commande commande = getCommandeOuErreur(id);
         verifierStatutAutorise(commande, StatutCommande.EN_PREPARATION);
         commande.setStatut(StatutCommande.PRETE);
-        return CommandeResponse.fromEntity(commandeRepository.save(commande));
+        CommandeResponse response = CommandeResponse.fromEntity(commandeRepository.save(commande));
+        notifier(response);
+        return response;
     }
 
     // ─────────────────────────────────────────────
@@ -115,7 +130,9 @@ public class CommandeService {
         Commande commande = getCommandeOuErreur(id);
         verifierStatutAutorise(commande, StatutCommande.PRETE);
         commande.setStatut(StatutCommande.SERVIE);
-        return CommandeResponse.fromEntity(commandeRepository.save(commande));
+        CommandeResponse response = CommandeResponse.fromEntity(commandeRepository.save(commande));
+        notifier(response);
+        return response;
     }
 
     // ─────────────────────────────────────────────
@@ -127,7 +144,9 @@ public class CommandeService {
         Commande commande = getCommandeOuErreur(id);
         verifierStatutAutorise(commande, StatutCommande.SERVIE);
         commande.setStatut(StatutCommande.EN_ATTENTE_PAIEMENT);
-        return CommandeResponse.fromEntity(commandeRepository.save(commande));
+        CommandeResponse response = CommandeResponse.fromEntity(commandeRepository.save(commande));
+        notifier(response);
+        return response;
     }
 
     // ─────────────────────────────────────────────
@@ -138,7 +157,6 @@ public class CommandeService {
     public CommandeResponse annulerCommande(Long id, Long annuleParId, AnnulationRequest request) {
         Commande commande = getCommandeOuErreur(id);
 
-        // On ne peut annuler que si pas encore en préparation ou payée
         if (commande.getStatut() == StatutCommande.EN_PREPARATION
                 || commande.getStatut() == StatutCommande.PRETE
                 || commande.getStatut() == StatutCommande.SERVIE
@@ -154,7 +172,9 @@ public class CommandeService {
         commande.setMotifAnnulation(request.getMotifAnnulation());
         commande.setDateAnnulation(LocalDateTime.now());
 
-        return CommandeResponse.fromEntity(commandeRepository.save(commande));
+        CommandeResponse response = CommandeResponse.fromEntity(commandeRepository.save(commande));
+        notifier(response);
+        return response;
     }
 
     // ─────────────────────────────────────────────
@@ -169,7 +189,9 @@ public class CommandeService {
         }
         commande.setNoteSatisfaction(request.getNoteSatisfaction());
         commande.setCommentaireClient(request.getCommentaireClient());
-        return CommandeResponse.fromEntity(commandeRepository.save(commande));
+        CommandeResponse response = CommandeResponse.fromEntity(commandeRepository.save(commande));
+        notifier(response);
+        return response;
     }
 
     // ─────────────────────────────────────────────
@@ -182,6 +204,13 @@ public class CommandeService {
 
     public List<CommandeResponse> getCommandesParStatut(StatutCommande statut) {
         return commandeRepository.findByStatutOrderByDateCreationAsc(statut)
+                .stream()
+                .map(CommandeResponse::fromEntity)
+                .collect(Collectors.toList());
+    }
+
+    public List<CommandeResponse> getToutesLesCommandes() {
+        return commandeRepository.findAllByOrderByDateCreationAsc()
                 .stream()
                 .map(CommandeResponse::fromEntity)
                 .collect(Collectors.toList());
@@ -218,14 +247,5 @@ public class CommandeService {
                             + ", statut requis = " + statutAttendu
             );
         }
-    }
-
-    // ─── Ajouter cette méthode dans CommandeService.java ───
-
-    public List<CommandeResponse> getToutesLesCommandes() {
-        return commandeRepository.findAllByOrderByDateCreationAsc()
-                .stream()
-                .map(CommandeResponse::fromEntity)
-                .toList();
     }
 }
