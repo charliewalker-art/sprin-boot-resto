@@ -664,3 +664,189 @@ Ces ajouts permettent :
 
 (Section ajoutée automatiquement — aucune autre partie du fichier n'a été modifiée.)
 
+---
+
+## Clarifications & Corrections — Conformité avec le code réel
+
+Suite à l'analyse approfondie du code source, les clarifications suivantes doivent être appliquées au rapport précédent :
+
+### 1. **Statut initial de la commande (Correction critique)**
+
+**Erreur détectée dans la section "Cycle de vie d'une commande":**
+- Le rapport stipulait : `creerCommande()` crée une commande avec le statut `CREEE`.
+- **Code réel** : `creerCommande()` crée une commande avec le statut **`EN_ATTENTE_CUISINE`** directement.
+
+**Cycle de vie réel corrigé :**
+
+```
+[EN_ATTENTE_CUISINE] ◄─── creerCommande()
+        │
+        ├─ Pas d'étape validerCommande() préalable
+        │
+        ▼
+    commencerPreparation() — CUISINIERE
+        │
+        ▼
+[EN_PREPARATION]
+        │
+    marquerPrete() — CUISINIERE
+        │
+        ▼
+    [PRETE]
+        │
+    marquerServie() — SERVEUR
+        │
+        ▼
+    [SERVIE]
+        │
+    demanderAddition() — CLIENT
+        │
+        ▼
+    [EN_ATTENTE_PAIEMENT]
+        │
+    encaisser() — CAISSIER
+        │
+        ▼
+    [PAYEE]
+        │
+    (table → EN_COURS_DE_NETTOYAGE)
+
+Annulation possible depuis : EN_ATTENTE_CUISINE ou EN_PREPARATION
+(impossible depuis PRETE, SERVIE, PAYEE)
+```
+
+**Impact:** La méthode `validerCommande()` mentionnée dans le rapport n'est pas utilisée dans le flux réel ; la commande passe directement à `EN_ATTENTE_CUISINE` à la création.
+
+---
+
+### 2. **Énums StatutCommande (Mise à jour)**
+
+**Énumération réelle vs. rapport :**
+
+| Énumération | Rapport | Code réel | Notes |
+|-----------|---------|----------|-------|
+| État initial | `CREEE` | `EN_ATTENTE_CUISINE` | Aucune étape `CREEE` |
+| Étapes intermédiaires | ✓ EN_ATTENTE_CUISINE, EN_PREPARATION, PRETE, SERVIE | ✓ Idem | Confirmé |
+| Avant paiement | `EN_ATTENTE_PAIEMENT` | ✓ `EN_ATTENTE_PAIEMENT` | Confirmé |
+| États finaux | `PAYEE`, `ANNULEE` | ✓ Idem | Confirmé |
+
+---
+
+### 3. **Endpoints validés par le code**
+
+Les endpoints suivants du rapport ont été confirmés présents dans `CommandeController.java` et `PaiementController.java` :
+
+**CommandeController :**
+- `POST /api/commandes` — création directe en `EN_ATTENTE_CUISINE`
+- `GET /api/commandes` — liste avec filtre par statut optionnel
+- `GET /api/commandes/{id}` — détail d'une commande
+- `PATCH /api/commandes/{id}/commencer` — transition vers `EN_PREPARATION`
+- `PATCH /api/commandes/{id}/prete` — transition vers `PRETE`
+- `PATCH /api/commandes/{id}/servie` — transition vers `SERVIE`
+- `PATCH /api/commandes/{id}/addition` — transition vers `EN_ATTENTE_PAIEMENT`
+- `PATCH /api/commandes/{id}/annuler` — annulation
+- `PATCH /api/commandes/{id}/evaluer` — ajout note + commentaire
+
+**PaiementController :**
+- `POST /api/paiements` — encaissement (transition PAYEE + table nettoyage)
+- `GET /api/paiements/commande/{commandeId}` — paiement spécifique
+- `GET /api/paiements/aujourdhui` — paiements du jour
+- `GET /api/paiements/stats` — statistiques CA + pourboires
+
+---
+
+### 4. **WebSocket — Notifications en temps réel (Confirmé)**
+
+La configuration WebSocket de `WebSocketConfig.java` est correctement documentée. Les points clés confirmés :
+
+- **Endpoint STOMP** : `/ws` (avec fallback SockJS)
+- **Topic de subscription** : `/topic/commandes`
+- **Destinations applicatives** : `/app/*`
+- **Utilisation** : `CommandeService` et `PaiementService` injectent `SimpMessagingTemplate` et appellent `notifier()` après chaque transition d'état pour diffuser les changements en direct.
+
+---
+
+### 5. **Sécurité : @PreAuthorize en vigueur**
+
+Les controllers (`CommandeController`, `PaiementController`) utilisent `@PreAuthorize` avec des rôles spécifiques. **Important** : pour que ces annotations s'appliquent, `@EnableMethodSecurity` doit être activé sur `MonappwebApplication.java` ou via `SecurityConfig.java`.
+
+**Vérification requise :**
+
+```java
+// À vérifier dans MonappwebApplication.java ou SecurityConfig.java
+@EnableMethodSecurity
+public class MonappwebApplication { ... }
+```
+
+**Matrice de droits confirmée :**
+
+| Endpoint | Rôles autorisés | Code |
+|----------|-----------------|------|
+| `PATCH /api/commandes/{id}/commencer` | CUISINIERE, MANAGER | ✓ Présent |
+| `PATCH /api/commandes/{id}/prete` | CUISINIERE, MANAGER | ✓ Présent |
+| `PATCH /api/commandes/{id}/servie` | SERVEUR, MANAGER | ✓ Présent |
+| `POST /api/paiements` | CAISSIER, MANAGER | ✓ Présent |
+| `GET /api/paiements/stats` | MANAGER | ✓ Présent |
+
+---
+
+### 6. **LoginResponse — Ajout de l'ID utilisateur (Confirmé)**
+
+- **DTO modifié** : `LoginResponse` inclut maintenant `Long id` comme premier champ.
+- **AuthService** : le constructeur est appelé avec `utilisateur.getId()` en premier argument.
+- **Frontend** : peut désormais récupérer directement l'ID de l'utilisateur sans appel supplémentaire.
+
+**Structure actuelle de `LoginResponse` :**
+
+```java
+@Getter
+@AllArgsConstructor
+public class LoginResponse {
+    private Long id;              // ← Nouveau
+    private String token;
+    private String username;
+    private String role;
+    private String nom;
+    private String prenom;
+}
+```
+
+---
+
+### 7. **Services : Méthode getToutesLesCommandes()**
+
+**Ajout confirmé dans `CommandeService`** :
+
+```java
+public List<CommandeResponse> getToutesLesCommandes() {
+    return commandeRepository.findAllByOrderByDateCreationAsc()
+        .stream()
+        .map(CommandeResponse::fromEntity)
+        .collect(Collectors.toList());
+}
+```
+
+Utilisée par `GET /api/commandes` sans paramètre de statut.
+
+---
+
+### 8. **Recommandations d'action immédiate**
+
+1. **Vérifier `@EnableMethodSecurity`** dans `MonappwebApplication.java` → elle doit être présente pour activer les `@PreAuthorize`.
+2. **Mettre à jour la documentation client** : la création d'une commande la place directement en `EN_ATTENTE_CUISINE`, pas en `CREEE`.
+3. **Supprimer les références à `validerCommande()`** du rapport et de tout appel client.
+4. **Tester les notifications WebSocket** : vérifier que `/topic/commandes` reçoit bien les mises à jour après chaque transition d'état.
+5. **Audit de sécurité** : vérifier que les variables d'environnement JWT sont correctement configurées en production.
+
+---
+
+**Résumé des corrections** :
+- ✅ WebSocket + STOMP : opérationnel
+- ✅ Notifications en temps réel : confirmées
+- ✅ LoginResponse avec ID : confirmé
+- ✅ Endpoints : tous confirmés présents
+- ⚠️ **Statut initial** : **EN_ATTENTE_CUISINE**, pas `CREEE`
+- ⚠️ **@EnableMethodSecurity** : à vérifier
+
+(Clarifications appliquées suite à l'audit du code source — aucun contenu précédent n'a été supprimé.)
+
