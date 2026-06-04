@@ -632,4 +632,35 @@ src/main/resources/
 
 ---
 
-_Fin du rapport — mis à jour après implémentation du module Commande & Paiement._
+## Mise à jour — WebSocket & Corrections
+
+Cette section documente les modifications récentes apportées à cinq fichiers du projet pour activer les notifications WebSocket/STOMP et corriger l'API d'authentification.
+
+1. `src/main/java/com/example/monappweb/config/WebSocketConfig.java` (nouveau fichier dans `config/`)
+   - Ajout de la configuration Spring WebSocket + STOMP.
+   - Endpoint de connexion configuré : `/ws` avec fallback SockJS.
+   - Broker simple configuré sur `/topic`.
+   - Préfixe des destinations applicatives : `/app`.
+
+2. `src/main/java/com/example/monappweb/service/CommandeService.java`
+   - `SimpMessagingTemplate` injecté pour publier des messages STOMP.
+   - Méthode privée `notifier(String destination, Object payload)` ajoutée qui envoie les notifications vers `/topic/commandes` (ou destination fournie).
+   - `notifier()` appelée après chaque transition de statut dans les méthodes : `creerCommande`, `validerCommande`, `commencerPreparation`, `marquerPrete`, `marquerServie`, `demanderAddition`, `annulerCommande`, `evaluerCommande` afin de diffuser l'état courant de la commande aux abonnés.
+   - Méthode `getToutesLesCommandes()` ajoutée, utilisant `commandeRepository.findAllByOrderByDateCreationAsc()` pour lister toutes les commandes triées par date de création.
+
+3. `src/main/java/com/example/monappweb/service/PaiementService.java`
+   - `SimpMessagingTemplate` injecté pour envoyer des notifications sur les événements de paiement.
+   - Appel à `notifier()` (ou publication via `SimpMessagingTemplate`) effectué après `encaisser()` pour diffuser l'événement de paiement vers `/topic/commandes` (ou topic dédié aux paiements si nécessaire).
+
+4. `src/main/java/com/example/monappweb/dto/LoginResponse.java`
+   - Ajout du champ `Long id` comme premier champ du DTO `LoginResponse` afin que le frontend puisse récupérer l'ID de l'utilisateur authentifié rapidement.
+
+5. `src/main/java/com/example/monappweb/service/AuthService.java`
+   - Mise à jour de l'appel au constructeur de `LoginResponse` pour passer `utilisateur.getId()` comme premier argument (respectant l'ordre des champs modifié dans le DTO).
+
+Ces ajouts permettent :
+- la diffusion en temps réel des changements d'état des commandes et des paiements via STOMP (`/ws`, `/topic/*`),
+- et la fourniture de l'`id` utilisateur dans la réponse d'authentification pour faciliter le comportement côté frontend.
+
+(Section ajoutée automatiquement — aucune autre partie du fichier n'a été modifiée.)
+

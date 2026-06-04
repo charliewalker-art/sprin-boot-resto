@@ -5,6 +5,7 @@ import com.example.monappweb.dto.PlatResponse;
 import com.example.monappweb.entity.Plat;
 import com.example.monappweb.repository.PlatRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -15,6 +16,7 @@ public class PlatService {
 
     private final PlatRepository platRepository;
     private final UploadService uploadService;
+    private final SimpMessagingTemplate messagingTemplate;
 
     // Tous les plats (MANAGER)
     public List<PlatResponse> listerTous() {
@@ -45,7 +47,9 @@ public class PlatService {
                 .quantitePerdueJour(0)
                 .build();
 
-        return toResponse(platRepository.save(plat));
+        PlatResponse response = toResponse(platRepository.save(plat));
+        notifier(); // ← notifie les clients QR
+        return response;
     }
 
     // Modifier un plat
@@ -53,7 +57,6 @@ public class PlatService {
         Plat plat = platRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Plat introuvable : " + id));
 
-        // Si nouvelle image → supprime l'ancienne
         if (request.getImageUrl() != null &&
                 !request.getImageUrl().equals(plat.getImageUrl())) {
             uploadService.supprimerImage(plat.getImageUrl());
@@ -66,7 +69,9 @@ public class PlatService {
         plat.setAllergenes(request.getAllergenes());
         plat.setImageUrl(request.getImageUrl());
 
-        return toResponse(platRepository.save(plat));
+        PlatResponse response = toResponse(platRepository.save(plat));
+        notifier(); // ← notifie les clients QR
+        return response;
     }
 
     // Toggle disponible/indisponible
@@ -75,7 +80,9 @@ public class PlatService {
                 .orElseThrow(() -> new RuntimeException("Plat introuvable : " + id));
 
         plat.setDisponible(!plat.getDisponible());
-        return toResponse(platRepository.save(plat));
+        PlatResponse response = toResponse(platRepository.save(plat));
+        notifier(); // ← notifie les clients QR
+        return response;
     }
 
     // Déclarer une perte
@@ -84,7 +91,7 @@ public class PlatService {
                 .orElseThrow(() -> new RuntimeException("Plat introuvable : " + id));
 
         plat.setQuantitePerdueJour(plat.getQuantitePerdueJour() + quantite);
-        return toResponse(platRepository.save(plat));
+        return toResponse(platRepository.save(plat)); // pas de notif nécessaire ici
     }
 
     // Supprimer un plat
@@ -94,6 +101,12 @@ public class PlatService {
 
         uploadService.supprimerImage(plat.getImageUrl());
         platRepository.deleteById(id);
+        notifier(); // ← notifie les clients QR
+    }
+
+    // Envoie un signal de mise à jour du menu sur /topic/plats
+    private void notifier() {
+        messagingTemplate.convertAndSend("/topic/plats", "updated");
     }
 
     // Mapper entité → DTO
